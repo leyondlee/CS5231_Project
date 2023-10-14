@@ -13,7 +13,6 @@ typedef struct {
 
 typedef enum {
     SP_NOT_FOUND,
-    DECODE_FAIL,
     SUCCESS,
     FAIL
 } CheckReturnResult;

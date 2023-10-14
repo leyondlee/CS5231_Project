@@ -255,9 +255,7 @@ static void at_return(app_pc instr_addr, app_pc target_addr)
                 dr_fprintf(STDERR, "longjmp detected @ " PFX "\n", instr_addr);
             }
             break;
-
-        case DECODE_FAIL:
-            // Fallthrough
+            
         case FAIL:
             dr_fprintf(STDERR, "!!!Buffer Overflow Detected @ " PFX "!!!\n", instr_addr);
             dr_abort();
