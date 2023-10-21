@@ -38,20 +38,34 @@ static void event_exit(void)
 
 static void event_thread_init(void *drcontext)
 {
+    ThreadContext *threadContext = dr_thread_alloc(drcontext, sizeof(ThreadContext));
+    if (threadContext == NULL) {
+        dr_abort();
+    }
+
     CallStack *callStack = dr_thread_alloc(drcontext, sizeof(CallStack));
     if (callStack == NULL) {
         dr_abort();
     }
 
     callStack->head = NULL;
+    callStack->size = 0;
+
+    threadContext->callStack = callStack;
+    threadContext->thread_id = dr_get_thread_id(drcontext);
+
+    //printf("[%d] New Thread with ID %d\n", dr_get_process_id(), threadContext->thread_id);
 
     /* store it in the slot provided in the drcontext */
-    drmgr_set_tls_field(drcontext, tls_idx, callStack);
+    drmgr_set_tls_field(drcontext, tls_idx, threadContext);
 }
 
 static void event_thread_exit(void *drcontext)
 {
-    CallStack *callStack = drmgr_get_tls_field(drcontext, tls_idx);
+    ThreadContext *threadContext = drmgr_get_tls_field(drcontext, tls_idx);
+    DR_ASSERT(threadContext != NULL);
+
+    CallStack *callStack = threadContext->callStack;
     DR_ASSERT(callStack != NULL);
 
     CallStackItem *item = callStack->head;
@@ -62,6 +76,7 @@ static void event_thread_exit(void *drcontext)
     }
 
     dr_thread_free(drcontext, callStack, sizeof(CallStack));
+    dr_thread_free(drcontext, threadContext, sizeof(ThreadContext));
 }
 
 /**
@@ -77,27 +92,9 @@ static void pushItemToCallStack(CallStack *callStack, CallStackItem *item)
     DR_ASSERT(callStack != NULL && item != NULL);
 
     item->next = callStack->head;
+
     callStack->head = item;
-}
-
-/**
- * Returns item at the top of CallStack.
- * 
- * @param[in] callStack The pointer to the CallStack struct.
- * @return Returns NULL if there is nothing on the CallStack, otherwise, return pointer to the CallStackItem struct.
- * 
- * @pre callStack != NULL
-*/
-static CallStackItem *peekCallStack(CallStack *callStack)
-{
-    DR_ASSERT(callStack != NULL);
-
-    CallStackItem *item = callStack->head;
-    if (item == NULL) {
-        return NULL;
-    }
-
-    return item;
+    callStack->size += 1;
 }
 
 /**
@@ -108,7 +105,7 @@ static CallStackItem *peekCallStack(CallStack *callStack)
  * 
  * @pre callStack != NULL
 */
-static CallStackItem *popCallStack(CallStack *callStack)
+static CallStackItem *popItemFromCallStack(CallStack *callStack)
 {
     DR_ASSERT(callStack != NULL);
 
@@ -118,15 +115,23 @@ static CallStackItem *popCallStack(CallStack *callStack)
     }
 
     callStack->head = item->next;
+
+    DR_ASSERT(callStack->size >= 1);
+    callStack->size -= 1;
+
     return item;
 }
 
 static bool pushCall(reg_t sp, app_pc pc)
 {
     void *drcontext = dr_get_current_drcontext();
+    ThreadContext *threadContext = drmgr_get_tls_field(drcontext, tls_idx);
+    DR_ASSERT(threadContext != NULL);
 
-    CallStack *callStack = drmgr_get_tls_field(drcontext, tls_idx);
+    CallStack *callStack = threadContext->callStack;
     DR_ASSERT(callStack != NULL);
+
+    //dr_fprintf(STDERR, "[Thread %u] callStack = %p (size: %ld)\n", threadContext->thread_id, threadContext->callStack, threadContext->callStack->size);
 
     CallStackItem *item = dr_thread_alloc(drcontext, sizeof(CallStackItem));
     if (item == NULL) {
@@ -165,28 +170,27 @@ static bool pushCall(reg_t sp, app_pc pc)
 static CheckReturnResult checkReturn(reg_t sp, app_pc target_addr, bool *hasLongJmpPtr)
 {
     void *drcontext = dr_get_current_drcontext();
-    CallStack *callStack = drmgr_get_tls_field(drcontext, tls_idx);
+    ThreadContext *threadContext = drmgr_get_tls_field(drcontext, tls_idx);
+    DR_ASSERT(threadContext != NULL);
+
+    CallStack *callStack = threadContext->callStack;
     DR_ASSERT(callStack != NULL);
 
     bool found = false;
     bool hasLongJmp = false;
     CallStackItem *item;
-    CallStackItem *prevPeekItem = NULL;
     while (!found) {
-        CallStackItem *peekItem = peekCallStack(callStack);
-        if (peekItem == NULL || peekItem == prevPeekItem) {
-            // No items left or already peeked before
+        item = popItemFromCallStack(callStack);
+        if (item == NULL) {
+            return EMPTY_CALLSTACK;
+        }
+
+        if (item->sp > sp) {
+            pushItemToCallStack(callStack, item); // Push item back to callstack
             return SP_NOT_FOUND;
         }
 
-        if (peekItem->sp > sp) {
-            // Next item and after are for previous call frames. Note: The stack grows to lower address.
-            //dr_fprintf(STDERR, "peekItem->sp > sp: peekItem(sp=0x%lx, value=" PFX "), sp=0x%lx\n", peekItem->sp, peekItem->value, sp);
-            return SP_NOT_FOUND;
-        }
-
-        item = popCallStack(callStack);
-        DR_ASSERT(item != NULL && item == peekItem && item->sp <= sp);
+        DR_ASSERT(item != NULL && item->sp <= sp);
 
         if (item->sp == sp) {
             found = true;
@@ -246,9 +250,13 @@ static void at_return(app_pc instr_addr, app_pc target_addr)
     bool hasLongJmp;
     CheckReturnResult res = checkReturn(mc.xsp, target_addr, &hasLongJmp);
     switch (res) {
+        case EMPTY_CALLSTACK:
+            dr_fprintf(STDERR, "Empty call stack @ " PFX ", SP=" PFX "\n", instr_addr, mc.xsp);
+            break;
+
         case SP_NOT_FOUND:
             dr_fprintf(STDERR, "Skipping check for instruction @ " PFX ", SP=" PFX "\n", instr_addr, mc.xsp);
-            // Fallthrough
+            break;
 
         case SUCCESS:
             if (hasLongJmp) {
