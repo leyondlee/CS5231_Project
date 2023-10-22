@@ -256,15 +256,15 @@ bool getSymbolString(app_pc addr, SymbolString *symbolString)
 
         size_t addrSize = sizeof(app_pc) + 2; // 0x...
 
-        // addr, " in ", modname, '!', sym.name, '+', (addr - data->start - sym.start_offs), '\0'
-        maxStringLength = (2 * addrSize) + strlen(modname) + strlen(sym.name) + addrSize + 7;
+        // addr, ' ', modname, ':', (addr - data->start), '!', sym.name, '+', (addr - data->start - sym.start_offs), '\0'
+        maxStringLength = (3 * addrSize) + strlen(modname) + strlen(sym.name) + addrSize + 5;
         string = dr_thread_alloc(drcontext, maxStringLength);
         if (string == NULL) {
             dr_free_module_data(data);
             return false;
         }
 
-        dr_snprintf(string, maxStringLength, PFX " in %s!%s+" PIFX, (addr - data->start), modname, sym.name, (addr - data->start - sym.start_offs));
+        dr_snprintf(string, maxStringLength, PFX " %s:" PIFX "!%s+" PIFX, addr, modname, (addr - data->start), sym.name, (addr - data->start - sym.start_offs));
         string[maxStringLength - 1] = '\0';
     } else {
         if (!getDefaultSymbolString(&string, &maxStringLength)) {
@@ -290,25 +290,25 @@ static void initHeapList(HeapList *heapList)
     heapList->size = 0;
 }
 
-static void printHeapList(HeapList *heapList)
-{
-    DR_ASSERT(heapList != NULL);
+// static void printHeapList(HeapList *heapList)
+// {
+//     DR_ASSERT(heapList != NULL);
 
-    dr_fprintf(STDERR, "heapList->head = %p\n", heapList->head);
-    dr_fprintf(STDERR, "heapList->tail = %p\n", heapList->tail);
-    dr_fprintf(STDERR, "heapList->size = %ld\n", heapList->size);
+//     dr_fprintf(STDERR, "heapList->head = %p\n", heapList->head);
+//     dr_fprintf(STDERR, "heapList->tail = %p\n", heapList->tail);
+//     dr_fprintf(STDERR, "heapList->size = %ld\n", heapList->size);
 
-    HeapNode *node = heapList->head;
-    while (node != NULL) {
-        dr_fprintf(STDERR, "%p (%ld)", node->address, node->size);
-        if (node == heapList->tail) {
-            dr_fprintf(STDERR, "\n");
-        } else {
-            dr_fprintf(STDERR, "->");
-        }
-        node = node->next;
-    }
-}
+//     HeapNode *node = heapList->head;
+//     while (node != NULL) {
+//         dr_fprintf(STDERR, "%p (%ld)", node->address, node->size);
+//         if (node == heapList->tail) {
+//             dr_fprintf(STDERR, "\n");
+//         } else {
+//             dr_fprintf(STDERR, "->");
+//         }
+//         node = node->next;
+//     }
+// }
 
 static void addNodeToHeapList(HeapList *heapList, HeapNode *node)
 {
