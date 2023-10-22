@@ -1,19 +1,114 @@
+#include <string.h>
+
 #include "dr_api.h"
 #include "drmgr.h"
 #include "drsyms.h"
+#include "drwrap.h"
 
 #include "detector.h"
 
+#define MALLOC_ROUTINE_NAME "malloc"
+#define FREE_ROUTINE_NAME "free"
+
 static void event_exit(void);
-static void event_thread_init(void *drcontext);
-static void event_thread_exit(void *drcontext);
-static dr_emit_flags_t event_app_instruction(void *drcontext, void *tag, instrlist_t *bb, instr_t *instr, bool for_trace, bool translating, void *user_data);
+static void event_thread_init(void *);
+static void event_thread_exit(void *);
+static dr_emit_flags_t event_app_instruction(void *, void *, instrlist_t *, instr_t *, bool , bool , void *);
+static void wrap_malloc_pre(void *, OUT void **);
+static void wrap_malloc_post(void *, void *);
+static void wrap_free_pre(void *, OUT void **);
+static void printHeapList(HeapList *);
+static void initHeapList(HeapList *);
+static void addNodeToHeapList(HeapList *, HeapNode *);
+static bool removeNodeFromHeapList(HeapList *, HeapNode *);
+static HeapNode *findNodeInHeapList(HeapList *, void *);
+
 static int tls_idx;
+static HeapList heapList;
+
+static void module_load_event(void *drcontext, const module_data_t *mod, bool loaded)
+{
+    app_pc malloc_address = (app_pc) dr_get_proc_address(mod->handle, MALLOC_ROUTINE_NAME);
+    if (malloc_address != NULL) {
+        bool ok = drwrap_wrap(malloc_address, wrap_malloc_pre, wrap_malloc_post);
+        if (!ok) {
+            dr_fprintf(STDERR,
+                        "<FAILED to wrap " MALLOC_ROUTINE_NAME " @" PFX
+                        ": already wrapped?\n",
+                        malloc_address);
+        }
+    }
+
+    app_pc free_address = (app_pc) dr_get_proc_address(mod->handle, FREE_ROUTINE_NAME);
+    if (free_address != NULL) {
+        bool ok = drwrap_wrap(free_address, wrap_free_pre, NULL);
+        if (!ok) {
+            dr_fprintf(STDERR,
+                        "<FAILED to wrap " FREE_ROUTINE_NAME " @" PFX
+                        ": already wrapped?\n",
+                        free_address);
+        }
+    }
+}
+
+static void wrap_malloc_pre(void *wrapcxt, OUT void **user_data)
+{
+    size_t size = (size_t) drwrap_get_arg(wrapcxt, 0);
+    *user_data = (void *) size;
+}
+
+static void wrap_malloc_post(void *wrapcxt, void *user_data)
+{
+    HeapNode *node = dr_global_alloc(sizeof(HeapNode));
+    if (node == NULL) {
+        // Fail to allocate memory
+        dr_abort();
+    }
+
+    void *address = drwrap_get_retval(wrapcxt);
+    if (address == NULL) {
+        return;
+    }
+
+    node->address = address;
+    node->size = (size_t) user_data;
+    node->prev = NULL;
+    node->next = NULL;
+    addNodeToHeapList(&heapList, node);
+
+    //dr_fprintf(STDERR, "[malloc] Address: %p, Size: %ld\n", node->address, node->size);
+}
+
+static void wrap_free_pre(void *wrapcxt, OUT void **user_data)
+{
+    void *ptr = drwrap_get_arg(wrapcxt, 0);
+    if (ptr == NULL) {
+        return;
+    }
+
+    HeapNode *node = findNodeInHeapList(&heapList, ptr);
+    if (node == NULL) {
+        dr_fprintf(STDERR, "Freeing unallocated memory: %p\n", ptr);
+        dr_abort();
+    }
+    DR_ASSERT(node->address == ptr);
+
+    bool isRemoved = removeNodeFromHeapList(&heapList, node);
+    DR_ASSERT(isRemoved);
+
+    //dr_fprintf(STDERR, "[free] ptr: %p\n", node->address);
+
+    dr_global_free(node, sizeof(HeapNode));
+}
 
 DR_EXPORT void dr_client_main(client_id_t id, int argc, const char *argv[])
 {
     dr_set_client_name("DynamoRIO Client 'Detector'", "");
     drmgr_init();
+    if (drsym_init(0) != DRSYM_SUCCESS) {
+        dr_log(NULL, DR_LOG_ALL, 1, "WARNING: unable to initialize symbol translation\n");
+    }
+    drwrap_init();
 
     dr_fprintf(STDERR, "Client Detector is running\n");
 
@@ -21,18 +116,26 @@ DR_EXPORT void dr_client_main(client_id_t id, int argc, const char *argv[])
     drmgr_register_bb_instrumentation_event(NULL, event_app_instruction, NULL);
     drmgr_register_thread_init_event(event_thread_init);
     drmgr_register_thread_exit_event(event_thread_exit);
-
-    if (drsym_init(0) != DRSYM_SUCCESS) {
-        dr_log(NULL, DR_LOG_ALL, 1, "WARNING: unable to initialize symbol translation\n");
-    }
+    drmgr_register_module_load_event(module_load_event);
 
     tls_idx = drmgr_register_tls_field();
     DR_ASSERT(tls_idx > -1);
+
+    initHeapList(&heapList);
 }
 
 static void event_exit(void)
 {
+    HeapNode *node = heapList.head;
+    while (node != NULL) {
+        HeapNode *next = node->next;
+        dr_global_free(node, sizeof(HeapNode));
+        node = next;
+    }
+
     drmgr_unregister_tls_field(tls_idx);
+    drwrap_exit();
+    drsym_exit();
     drmgr_exit();
 }
 
@@ -68,58 +171,262 @@ static void event_thread_exit(void *drcontext)
     CallStack *callStack = threadContext->callStack;
     DR_ASSERT(callStack != NULL);
 
-    CallStackItem *item = callStack->head;
-    while (item != NULL) {
-        CallStackItem *next = item->next;
-        dr_thread_free(drcontext, item, sizeof(CallStackItem));
-        item = next;
+    CallStackNode *node = callStack->head;
+    while (node != NULL) {
+        CallStackNode *next = node->next;
+        dr_thread_free(drcontext, node, sizeof(CallStackNode));
+        node = next;
     }
 
     dr_thread_free(drcontext, callStack, sizeof(CallStack));
     dr_thread_free(drcontext, threadContext, sizeof(ThreadContext));
 }
 
+void freeSymbolString(SymbolString *symbolString)
+{
+    DR_ASSERT(symbolString != NULL);
+
+    void *drcontext = dr_get_current_drcontext();
+    char *data = symbolString->data;
+    dr_thread_free(drcontext, data, symbolString->length);
+
+    symbolString->data = NULL;
+    symbolString->length = 0;
+}
+
+bool getDefaultSymbolString(char **stringPtr, size_t *lengthPtr)
+{
+    char *defaultString = "? ??:0";
+
+    size_t stringLength = strlen(defaultString) + 1;
+
+    void *drcontext = dr_get_current_drcontext();
+    char *string = dr_thread_alloc(drcontext, stringLength);
+    if (string == NULL) {
+        return false;
+    }
+
+    dr_snprintf(string, stringLength, "%s", defaultString);
+    string[stringLength - 1] = '\0';
+
+    *stringPtr = string;
+    *lengthPtr = stringLength;
+
+    return true;
+}
+
+bool getSymbolString(app_pc addr, SymbolString *symbolString)
+{
+    #define MAX_SYM_RESULT 256
+    char name[MAX_SYM_RESULT];
+    char file[MAXIMUM_PATH];
+
+    module_data_t *data = dr_lookup_module(addr);
+    if (data == NULL) {
+        char *string;
+        size_t length;
+
+        if (!getDefaultSymbolString(&string, &length)) {
+            return false;
+        }
+
+        symbolString->data = string;
+        symbolString->length = length;
+
+        return true;
+    }
+
+    drsym_info_t sym;
+    sym.struct_size = sizeof(sym);
+    sym.name = name;
+    sym.name_size = MAX_SYM_RESULT;
+    sym.file = file;
+    sym.file_size = MAXIMUM_PATH;
+
+    drsym_error_t symres = drsym_lookup_address(data->full_path, addr - data->start, &sym, DRSYM_DEFAULT_FLAGS);
+
+    void *drcontext = dr_get_current_drcontext();
+    char *string;
+    size_t maxStringLength;
+    if (symres == DRSYM_SUCCESS || symres == DRSYM_ERROR_LINE_NOT_AVAILABLE) {
+        const char *modname = dr_module_preferred_name(data);
+        if (modname == NULL) {
+            modname = "<noname>";
+        }
+
+        size_t addrSize = sizeof(app_pc) + 2; // 0x...
+
+        // addr, " in ", modname, '!', sym.name, '+', (addr - data->start - sym.start_offs), '\0'
+        maxStringLength = (2 * addrSize) + strlen(modname) + strlen(sym.name) + addrSize + 7;
+        string = dr_thread_alloc(drcontext, maxStringLength);
+        if (string == NULL) {
+            dr_free_module_data(data);
+            return false;
+        }
+
+        dr_snprintf(string, maxStringLength, PFX " in %s!%s+" PIFX, (addr - data->start), modname, sym.name, (addr - data->start - sym.start_offs));
+        string[maxStringLength - 1] = '\0';
+    } else {
+        if (!getDefaultSymbolString(&string, &maxStringLength)) {
+            dr_free_module_data(data);
+            return false;
+        }
+    }
+
+    dr_free_module_data(data);
+
+    symbolString->data = string;
+    symbolString->length = maxStringLength;
+
+    return true;
+}
+
+static void initHeapList(HeapList *heapList)
+{
+    DR_ASSERT(heapList != NULL);
+
+    heapList->head = NULL;
+    heapList->tail = NULL;
+    heapList->size = 0;
+}
+
+static void printHeapList(HeapList *heapList)
+{
+    DR_ASSERT(heapList != NULL);
+
+    dr_fprintf(STDERR, "heapList->head = %p\n", heapList->head);
+    dr_fprintf(STDERR, "heapList->tail = %p\n", heapList->tail);
+    dr_fprintf(STDERR, "heapList->size = %ld\n", heapList->size);
+
+    HeapNode *node = heapList->head;
+    while (node != NULL) {
+        dr_fprintf(STDERR, "%p (%ld)", node->address, node->size);
+        if (node == heapList->tail) {
+            dr_fprintf(STDERR, "\n");
+        } else {
+            dr_fprintf(STDERR, "->");
+        }
+        node = node->next;
+    }
+}
+
+static void addNodeToHeapList(HeapList *heapList, HeapNode *node)
+{
+    DR_ASSERT(heapList != NULL && node != NULL);
+
+    if (heapList->size == 0) {
+        // heapList is empty
+        DR_ASSERT(heapList->head == NULL && heapList->tail == NULL);
+
+        heapList->head = node;
+        heapList->tail = node;
+    } else {
+        DR_ASSERT(heapList->head != NULL && heapList->tail != NULL);
+
+        node->prev = heapList->tail;
+        node->prev->next = node;
+        heapList->tail = node;
+    }
+
+    heapList->size += 1;
+}
+
+static bool removeNodeFromHeapList(HeapList *heapList, HeapNode *node)
+{
+    DR_ASSERT(heapList != NULL && node != NULL);
+
+    HeapNode *curNode = heapList->head;
+    while (curNode != NULL) {
+        if (curNode == node) {
+            HeapNode *prevNode = curNode->prev;
+            if (prevNode == NULL) {
+                // curNode is head
+                DR_ASSERT(curNode == heapList->head);
+                heapList->head = curNode->next;
+            } else {
+                DR_ASSERT(prevNode != heapList->head);
+                prevNode->next = curNode->next;
+            }
+
+            HeapNode *nextNode = curNode->next;
+            if (nextNode == NULL) {
+                // curNode is tail
+                DR_ASSERT(curNode == heapList->tail);
+                heapList->tail = curNode->prev;
+            } else {
+                DR_ASSERT(curNode != heapList->tail);
+                nextNode->prev = curNode->prev;
+            }
+
+            DR_ASSERT(heapList->size >= 1);
+            heapList->size -= 1;
+
+            return true;
+        }
+
+        curNode = curNode->next;
+    }
+
+    return false;
+}
+
+static HeapNode *findNodeInHeapList(HeapList *heapList, void *address)
+{
+    DR_ASSERT(heapList != NULL);
+
+    HeapNode *node = heapList->head;
+    while (node != NULL) {
+        if (node->address == address) {
+            return node;
+        }
+
+        node = node->next;
+    }
+    
+    return NULL;
+}
+
 /**
- * Push item to CallStack.
+ * Push node to CallStack.
  * 
  * @param[in] callStack The pointer to the CallStack struct.
- * @param[in] item The pointer to the CallStackItem struct.
+ * @param[in] node The pointer to the CallStackNode struct.
  * 
- * @pre callStack != NULL && item != NULL
+ * @pre callStack != NULL && node != NULL
 */
-static void pushItemToCallStack(CallStack *callStack, CallStackItem *item)
+static void pushNodeToCallStack(CallStack *callStack, CallStackNode *node)
 {
-    DR_ASSERT(callStack != NULL && item != NULL);
+    DR_ASSERT(callStack != NULL && node != NULL);
 
-    item->next = callStack->head;
+    node->next = callStack->head;
 
-    callStack->head = item;
+    callStack->head = node;
     callStack->size += 1;
 }
 
 /**
- * Pop item from CallStack.
+ * Pop node from CallStack.
  * 
  * @param[in] callStack The pointer to the CallStack struct.
- * @return Returns NULL if there is nothing to pop, otherwise, return pointer to the CallStackItem struct. The CallStackItem needs to be freed by caller.
+ * @return Returns NULL if there is nothing to pop, otherwise, return pointer to the CallStackNode struct. The CallStackNode needs to be freed by caller.
  * 
  * @pre callStack != NULL
 */
-static CallStackItem *popItemFromCallStack(CallStack *callStack)
+static CallStackNode *popNodeFromCallStack(CallStack *callStack)
 {
     DR_ASSERT(callStack != NULL);
 
-    CallStackItem *item = callStack->head;
-    if (item == NULL) {
+    CallStackNode *node = callStack->head;
+    if (node == NULL) {
         return NULL;
     }
 
-    callStack->head = item->next;
+    callStack->head = node->next;
 
     DR_ASSERT(callStack->size >= 1);
     callStack->size -= 1;
 
-    return item;
+    return node;
 }
 
 static bool pushCall(reg_t sp, app_pc pc)
@@ -133,8 +440,8 @@ static bool pushCall(reg_t sp, app_pc pc)
 
     //dr_fprintf(STDERR, "[Thread %u] callStack = %p (size: %ld)\n", threadContext->thread_id, threadContext->callStack, threadContext->callStack->size);
 
-    CallStackItem *item = dr_thread_alloc(drcontext, sizeof(CallStackItem));
-    if (item == NULL) {
+    CallStackNode *node = dr_thread_alloc(drcontext, sizeof(CallStackNode));
+    if (node == NULL) {
         return false;
     }
 
@@ -145,14 +452,16 @@ static bool pushCall(reg_t sp, app_pc pc)
     instr_init(drcontext, &instr);
     app_pc res = decode(drcontext, pc, &instr);
     DR_ASSERT(res != NULL);
+    instr_free(drcontext, &instr);
 
     // Return address
     app_pc return_address = pc + instr_length(drcontext, &instr);
 
-    item->sp = next_sp;
-    item->value = return_address;
+    node->sp = next_sp;
+    node->value = return_address;
+    node->next = NULL;
     
-    pushItemToCallStack(callStack, item);
+    pushNodeToCallStack(callStack, node);
 
     return true;
 }
@@ -178,35 +487,35 @@ static CheckReturnResult checkReturn(reg_t sp, app_pc target_addr, bool *hasLong
 
     bool found = false;
     bool hasLongJmp = false;
-    CallStackItem *item;
+    CallStackNode *node;
     while (!found) {
-        item = popItemFromCallStack(callStack);
-        if (item == NULL) {
+        node = popNodeFromCallStack(callStack);
+        if (node == NULL) {
             return EMPTY_CALLSTACK;
         }
 
-        if (item->sp > sp) {
-            pushItemToCallStack(callStack, item); // Push item back to callstack
+        if (node->sp > sp) {
+            pushNodeToCallStack(callStack, node); // Push node back to callstack
             return SP_NOT_FOUND;
         }
 
-        DR_ASSERT(item != NULL && item->sp <= sp);
+        DR_ASSERT(node != NULL && node->sp <= sp);
 
-        if (item->sp == sp) {
+        if (node->sp == sp) {
             found = true;
             continue;
         }
 
         hasLongJmp = true;
         
-        //dr_fprintf(STDERR, "Removing item(sp=0x%lx, value=" PFX "), sp=0x%lx\n", item->sp, item->value, sp);
-        dr_thread_free(drcontext, item, sizeof(CallStackItem));
+        //dr_fprintf(STDERR, "Removing node(sp=0x%lx, value=" PFX "), sp=0x%lx\n", node->sp, node->value, sp);
+        dr_thread_free(drcontext, node, sizeof(CallStackNode));
     }
 
-    DR_ASSERT(item != NULL);
+    DR_ASSERT(node != NULL);
 
-    app_pc return_address = item->value;
-    dr_thread_free(drcontext, item, sizeof(CallStackItem));
+    app_pc return_address = node->value;
+    dr_thread_free(drcontext, node, sizeof(CallStackNode));
 
     if (return_address == target_addr) {
         *hasLongJmpPtr = hasLongJmp;
@@ -247,31 +556,39 @@ static void at_return(app_pc instr_addr, app_pc target_addr)
 
     //dr_fprintf(STDERR, "RETURN @ " PFX " to " PFX ", TOS is " PFX "\n", instr_addr, target_addr, mc.xsp);
 
+    SymbolString symbolString;
+    bool success = getSymbolString(instr_addr, &symbolString);
+    if (!success) {
+        dr_abort();
+    }
+
     bool hasLongJmp;
     CheckReturnResult res = checkReturn(mc.xsp, target_addr, &hasLongJmp);
     switch (res) {
         case EMPTY_CALLSTACK:
-            dr_fprintf(STDERR, "Empty call stack @ " PFX ", SP=" PFX "\n", instr_addr, mc.xsp);
+            dr_fprintf(STDERR, "Empty call stack @ %s, SP=" PFX "\n", symbolString.data, mc.xsp);
             break;
 
         case SP_NOT_FOUND:
-            dr_fprintf(STDERR, "Skipping check for instruction @ " PFX ", SP=" PFX "\n", instr_addr, mc.xsp);
+            dr_fprintf(STDERR, "Skipping check for instruction @ %s, SP=" PFX "\n", symbolString.data, mc.xsp);
             break;
 
         case SUCCESS:
             if (hasLongJmp) {
-                dr_fprintf(STDERR, "longjmp detected @ " PFX "\n", instr_addr);
+                dr_fprintf(STDERR, "longjmp detected @ %s\n", symbolString.data);
             }
             break;
             
         case FAIL:
-            dr_fprintf(STDERR, "!!!Buffer Overflow Detected @ " PFX "!!!\n", instr_addr);
+            dr_fprintf(STDERR, "!!!Stack Overflow Detected @ %s\n", symbolString.data);
             dr_abort();
             break;
 
         default:
             DR_ASSERT(false); // Should not be here
     }
+
+    freeSymbolString(&symbolString);
 }
 
 static dr_emit_flags_t event_app_instruction(void *drcontext, void *tag, instrlist_t *bb, instr_t *instr,

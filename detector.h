@@ -1,16 +1,30 @@
 #include "dr_defines.h"
 
-struct CallStackItem {
+struct CallStackNode {
     reg_t sp;
     app_pc value;
-    struct CallStackItem *next;
+    struct CallStackNode *next;
 };
-typedef struct CallStackItem CallStackItem;
+typedef struct CallStackNode CallStackNode;
 
 typedef struct {
-    CallStackItem *head;
+    CallStackNode *head;
     uint64 size;
 } CallStack;
+
+struct HeapNode {
+    void *address;
+    size_t size;
+    struct HeapNode *prev;
+    struct HeapNode *next;
+};
+typedef struct HeapNode HeapNode;
+
+typedef struct {
+    HeapNode *head;
+    HeapNode *tail;
+    uint64 size;
+} HeapList;
 
 typedef enum {
     EMPTY_CALLSTACK,
@@ -23,3 +37,8 @@ typedef struct {
     CallStack *callStack;
     thread_id_t thread_id;
 } ThreadContext;
+
+typedef struct {
+    char *data;
+    size_t length;
+} SymbolString;
