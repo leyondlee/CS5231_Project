@@ -171,10 +171,10 @@ static void event_thread_exit(void *drcontext)
     CallStack *callStack = threadContext->callStack;
     DR_ASSERT(callStack != NULL);
 
-    CallStackNode *node = callStack->head;
+    CallNode *node = callStack->head;
     while (node != NULL) {
-        CallStackNode *next = node->next;
-        dr_thread_free(drcontext, node, sizeof(CallStackNode));
+        CallNode *next = node->next;
+        dr_thread_free(drcontext, node, sizeof(CallNode));
         node = next;
     }
 
@@ -390,11 +390,11 @@ static HeapNode *findNodeInHeapList(HeapList *heapList, void *address)
  * Push node to CallStack.
  * 
  * @param[in] callStack The pointer to the CallStack struct.
- * @param[in] node The pointer to the CallStackNode struct.
+ * @param[in] node The pointer to the CallNode struct.
  * 
  * @pre callStack != NULL && node != NULL
 */
-static void pushNodeToCallStack(CallStack *callStack, CallStackNode *node)
+static void pushNodeToCallStack(CallStack *callStack, CallNode *node)
 {
     DR_ASSERT(callStack != NULL && node != NULL);
 
@@ -408,15 +408,15 @@ static void pushNodeToCallStack(CallStack *callStack, CallStackNode *node)
  * Pop node from CallStack.
  * 
  * @param[in] callStack The pointer to the CallStack struct.
- * @return Returns NULL if there is nothing to pop, otherwise, return pointer to the CallStackNode struct. The CallStackNode needs to be freed by caller.
+ * @return Returns NULL if there is nothing to pop, otherwise, return pointer to the CallNode struct. The CallNode needs to be freed by caller.
  * 
  * @pre callStack != NULL
 */
-static CallStackNode *popNodeFromCallStack(CallStack *callStack)
+static CallNode *popNodeFromCallStack(CallStack *callStack)
 {
     DR_ASSERT(callStack != NULL);
 
-    CallStackNode *node = callStack->head;
+    CallNode *node = callStack->head;
     if (node == NULL) {
         return NULL;
     }
@@ -440,7 +440,7 @@ static bool pushCall(reg_t sp, app_pc pc)
 
     //dr_fprintf(STDERR, "[Thread %u] callStack = %p (size: %ld)\n", threadContext->thread_id, threadContext->callStack, threadContext->callStack->size);
 
-    CallStackNode *node = dr_thread_alloc(drcontext, sizeof(CallStackNode));
+    CallNode *node = dr_thread_alloc(drcontext, sizeof(CallNode));
     if (node == NULL) {
         return false;
     }
@@ -487,7 +487,7 @@ static CheckReturnResult checkReturn(reg_t sp, app_pc target_addr, bool *hasLong
 
     bool found = false;
     bool hasLongJmp = false;
-    CallStackNode *node;
+    CallNode *node;
     while (!found) {
         node = popNodeFromCallStack(callStack);
         if (node == NULL) {
@@ -509,13 +509,13 @@ static CheckReturnResult checkReturn(reg_t sp, app_pc target_addr, bool *hasLong
         hasLongJmp = true;
         
         //dr_fprintf(STDERR, "Removing node(sp=0x%lx, value=" PFX "), sp=0x%lx\n", node->sp, node->value, sp);
-        dr_thread_free(drcontext, node, sizeof(CallStackNode));
+        dr_thread_free(drcontext, node, sizeof(CallNode));
     }
 
     DR_ASSERT(node != NULL);
 
     app_pc return_address = node->value;
-    dr_thread_free(drcontext, node, sizeof(CallStackNode));
+    dr_thread_free(drcontext, node, sizeof(CallNode));
 
     if (return_address == target_addr) {
         *hasLongJmpPtr = hasLongJmp;

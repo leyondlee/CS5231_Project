@@ -1,14 +1,14 @@
 #include "dr_defines.h"
 
-struct CallStackNode {
+struct CallNode {
     reg_t sp;
     app_pc value;
-    struct CallStackNode *next;
+    struct CallNode *next;
 };
-typedef struct CallStackNode CallStackNode;
+typedef struct CallNode CallNode;
 
 typedef struct {
-    CallStackNode *head;
+    CallNode *head;
     uint64 size;
 } CallStack;
 
