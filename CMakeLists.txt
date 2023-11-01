@@ -4,7 +4,7 @@ project(Detector)
 
 add_compile_options(-Wall)
 
-add_library(detector SHARED detector.c)
+add_library(detector SHARED src/detector.cpp src/heapnode.cpp src/threadcontext.cpp src/callnode.cpp)
 find_package(DynamoRIO)
 if (NOT DynamoRIO_FOUND)
   message(FATAL_ERROR "DynamoRIO package required to build")
