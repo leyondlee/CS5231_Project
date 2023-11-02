@@ -12,12 +12,11 @@ class ThreadContext {
 private:
     void *_drcontext;
     thread_id_t _threadId;
-    std::stack<CallNode *> *_callStack;
+    std::stack<CallNode *> _callStack;
 
 public:
-    ThreadContext(void *drcontext);
+    ThreadContext(void *);
     ~ThreadContext();
-
     thread_id_t getThreadId();
     std::stack<CallNode *> *getCallStack();
 };

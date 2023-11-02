@@ -10,7 +10,6 @@ private:
 
 public:
     HeapNode(void *, size_t);
-
     void *getAddress();
     size_t getSize();
 };
