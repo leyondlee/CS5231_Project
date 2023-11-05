@@ -90,7 +90,10 @@ DR_EXPORT void dr_client_main(client_id_t id, int argc, const char *argv[])
                 }
                 
                 node->addSymbolEdge(name, library);
+
+                delete valueSplit;
             } else {
+                // Unknown type
                 DR_ASSERT(false);
             }
 
@@ -708,7 +711,7 @@ static void processIndirectJump(app_pc instr_addr, app_pc target_addr)
         case DIFFERENT_MODULE: // instr_addr is not within same binary (eg. Shared library)
             // Fallthrough
 
-        case UNKNOWN_TARGET: // Cannot determine target_addr module (eg. In private mmap region)
+        case UNKNOWN_TARGET: // Cannot determine target_addr module (eg. Jumping into private mmap region)
             // Fallthrough
 
         case CFGNODE_NOT_FOUND: // Static analysis did find any edges for instr_addr
