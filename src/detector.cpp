@@ -471,8 +471,7 @@ static void wrap_free_pre(void *wrapcxt, OUT void **user_data)
 
     HeapNode *node = findNodeInHeapList(&heapList, ptr);
     if (node == nullptr) {
-        dr_mcontext_t *mc = drwrap_get_mcontext_ex(wrapcxt, DR_MC_CONTROL);
-        dr_fprintf(STDERR, "Freeing unallocated memory: " PFX " @ %s\n", ptr, getSymbolString(mc->pc).c_str());
+        dr_fprintf(STDERR, "Freeing unallocated memory: " PFX "\n", ptr);
         printCallTrace();
         dr_abort();
     }
