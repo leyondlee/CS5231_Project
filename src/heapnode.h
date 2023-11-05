@@ -9,7 +9,7 @@ private:
     size_t _size;
 
 public:
-    HeapNode(void *, size_t);
+    HeapNode(void *address, size_t size);
     void *getAddress();
     size_t getSize();
 };

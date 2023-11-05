@@ -15,7 +15,7 @@ private:
     std::stack<CallNode *> _callStack;
 
 public:
-    ThreadContext(void *);
+    ThreadContext(void *drcontext);
     ~ThreadContext();
     thread_id_t getThreadId();
     std::stack<CallNode *> *getCallStack();

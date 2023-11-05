@@ -1,9 +1,15 @@
 #include "cfgnode.h"
 
-CfgNode::CfgNode(char *binaryName, uint64 offset)
+CfgNode::CfgNode(uint64 offset)
 {
-    _binaryName = binaryName;
     _offset = offset;
+}
+
+CfgNode::~CfgNode()
+{
+    for (auto edge : _symbolEdges) {
+        delete edge;
+    }
 }
 
 void CfgNode::addOffsetEdge(uint64 offset)
@@ -11,9 +17,10 @@ void CfgNode::addOffsetEdge(uint64 offset)
     _offsetEdges.insert(offset);
 }
 
-void CfgNode::addSymbolEdge(std::string symbol)
+void CfgNode::addSymbolEdge(std::string name, std::string library)
 {
-    _symbolEdges.insert(symbol);
+    CfgSymbolEdge *edge = new CfgSymbolEdge(name, library);
+    _symbolEdges.insert(edge);
 }
 
 bool CfgNode::hasOffsetEdge(uint64 offset)
@@ -25,11 +32,25 @@ bool CfgNode::hasOffsetEdge(uint64 offset)
     return true;
 }
 
-bool CfgNode::hasSymbolEdge(std::string symbol)
+bool CfgNode::hasSymbolEdge(std::string name, std::string library, bool findSimilarName)
 {
-    if (_symbolEdges.find(symbol) == _symbolEdges.end()) {
-        return false;
+    for (auto edge : _symbolEdges) {
+        std::string edgeLibrary = edge->getLibrary();
+        if (!edgeLibrary.empty() && edgeLibrary != library) {
+            continue;
+        }
+
+        if (name == edge->getName()) {
+            return true;
+        }
+
+        if (findSimilarName) {
+            // Check if edge name is a substring of name
+            if (name.find(edge->getName()) != std::string::npos) {
+                return true;
+            }
+        }
     }
 
-    return true;
+    return false;
 }
