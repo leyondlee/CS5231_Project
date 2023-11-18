@@ -684,13 +684,21 @@ static CheckCfgResult checkCfg(app_pc instr_addr, app_pc target_addr)
 
     CheckCfgResult res = CFGEDGE_NOT_FOUND;
     if (targetModuleName == moduleName) {
-        // Same binary
+        // Target within same binary
         if (node->hasOffsetEdge(targetSymbolInfo->getModuleRelativeOffset())) {
             res = CFGEDGE_FOUND;
         }
     } else {
-        if (node->hasSymbolEdge(targetSymbolInfo->getSymbolName(), targetModuleName, true)) {
-            res = CFGEDGE_FOUND;
+        // External target
+        if (targetSymbolInfo->getSymbolRelativeOffset() == 0) {
+            // Start of function
+            if (node->hasSymbolEdge(targetSymbolInfo->getSymbolName(), targetModuleName, true)) {
+                // Found similar name
+                res = CFGEDGE_FOUND;
+            }
+        } else {
+            // Jumping to middle of function (possibly ROP)
+            res = NOT_BEGINNING;
         }
     }
 
@@ -715,6 +723,9 @@ static void processIndirectJump(app_pc instr_addr, app_pc target_addr)
 
         case CFGNODE_NOT_FOUND: // Static analysis did find any edges for instr_addr
             return; // Pass for now until we find a better way to handle
+
+        case NOT_BEGINNING:
+            // Fallthrough
 
         case CFGEDGE_NOT_FOUND: // target_addr did not match any valid edges
             dr_fprintf(STDERR, "Invalid edge detect @ %s to %s\n", getSymbolString(instr_addr).c_str(), getSymbolString(target_addr).c_str());
