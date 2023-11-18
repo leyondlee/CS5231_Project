@@ -70,7 +70,7 @@ if len(args) <= 0:
 	print('[' + getScriptName() + ']\n' + output)
 	sys.exit(0)
 
-filename = os.path.abspath(args[0])
+filename = os.path.normpath(os.path.abspath(args[0]))
 # if os.path.exists(filename):
 # 	print('[' + getScriptName() + '] File or folder with the same name already exists - \"' + filename + '\"')
 # 	sys.exit(1)

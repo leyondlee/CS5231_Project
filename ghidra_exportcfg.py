@@ -36,6 +36,11 @@ def main():
     os.remove(path)
 
     tempdir_path = tempfile.mkdtemp()
+
+    script_dir = GHIDRA_SCRIPTS_DIR
+    if not os.path.isabs(script_dir):
+        folder_name = os.path.dirname(os.path.abspath(__file__))
+        script_dir = os.path.abspath(os.path.join(folder_name, script_dir))
     
     args = [
         f'{os.path.expanduser(ghidra_install_dir)}/support/analyzeHeadless',
@@ -48,7 +53,7 @@ def main():
         '-loader-loadSystemLibraries',
         'true',
         '-scriptPath',
-        GHIDRA_SCRIPTS_DIR,
+        script_dir,
         '-postScript',
         SCRIPT_NAME,
         output_filename,
