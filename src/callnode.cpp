@@ -1,10 +1,11 @@
 #include "callnode.h"
 
-CallNode::CallNode(app_pc pc, reg_t sp, app_pc value)
+CallNode::CallNode(app_pc pc, reg_t sp, reg_t bp, app_pc return_address)
 {
     _pc = pc;
     _sp = sp;
-    _value = value;
+    _bp = bp;
+    _return_address = return_address;
 }
 
 app_pc CallNode::getPc()
@@ -17,7 +18,12 @@ reg_t CallNode::getSp()
     return _sp;
 }
 
-app_pc CallNode::getValue()
+reg_t CallNode::getBp()
 {
-    return _value;
+    return _bp;
+}
+
+app_pc CallNode::getReturnAddress()
+{
+    return _return_address;
 }

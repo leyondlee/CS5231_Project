@@ -13,7 +13,7 @@ DR_EXPORT void dr_client_main(client_id_t id, int argc, const char *argv[])
 
     const char *cfgFilename = argv[1];
     if (!dr_file_exists(cfgFilename)) {
-        dr_fprintf(STDERR, "File does not exist - %s\n", cfgFilename);
+        dr_fprintf(STDERR, "CFG file does not exist - %s\n", cfgFilename);
         dr_abort();
     }
 
@@ -178,19 +178,19 @@ static dr_emit_flags_t event_app_instruction(void *drcontext, void *tag, instrli
 
 static void at_call(app_pc instr_addr, app_pc target_addr)
 {
-    dr_mcontext_t mc = { sizeof(mc), DR_MC_CONTROL /*only need xsp*/ };
+    dr_mcontext_t mc = { sizeof(mc), DR_MC_ALL };
     dr_get_mcontext(dr_get_current_drcontext(), &mc);
     
     //dr_fprintf(STDERR, "CALL @ " PFX " to " PFX ", TOS is " PFX "\n", instr_addr, target_addr, mc.xsp);
 
-    if (!pushCall(instr_addr, mc.xsp)) {
+    if (!pushCall(instr_addr, mc.xbp, mc.xsp)) {
         dr_abort();
     }
 }
 
 static void at_call_ind(app_pc instr_addr, app_pc target_addr)
 {
-    dr_mcontext_t mc = { sizeof(mc), DR_MC_CONTROL /*only need xsp*/ };
+    dr_mcontext_t mc = { sizeof(mc), DR_MC_ALL };
     dr_get_mcontext(dr_get_current_drcontext(), &mc);
 
     //dr_fprintf(STDERR, "CALL INDIRECT @ " PFX " to " PFX "\n", instr_addr, target_addr);
@@ -198,14 +198,14 @@ static void at_call_ind(app_pc instr_addr, app_pc target_addr)
 
     processIndirectJump(instr_addr, target_addr);
     
-    if (!pushCall(instr_addr, mc.xsp)) {
+    if (!pushCall(instr_addr, mc.xbp, mc.xsp)) {
         dr_abort();
     }
 }
 
 static void at_return(app_pc instr_addr, app_pc target_addr)
 {
-    dr_mcontext_t mc = { sizeof(mc), DR_MC_CONTROL /*only need xsp*/ };
+    dr_mcontext_t mc = { sizeof(mc), DR_MC_ALL };
     dr_get_mcontext(dr_get_current_drcontext(), &mc);
 
     //dr_fprintf(STDERR, "RETURN @ " PFX " to " PFX ", TOS is " PFX "\n", instr_addr, target_addr, mc.xsp);
@@ -213,7 +213,7 @@ static void at_return(app_pc instr_addr, app_pc target_addr)
     std::string symbolString = getSymbolString(instr_addr);
 
     bool hasLongJmp;
-    CheckReturnResult res = checkReturn(mc.xsp, target_addr, &hasLongJmp);
+    CheckReturnResult res = checkReturn(mc.xsp, mc.xbp, target_addr, &hasLongJmp);
     switch (res) {
         case EMPTY_CALLSTACK:
             dr_fprintf(STDERR, "Empty call stack @ %s, SP=" PFX "\n", symbolString.c_str(), mc.xsp);
@@ -554,7 +554,7 @@ static CallNode *popNodeFromCallStack(std::stack<CallNode *> *callStack)
     return node;
 }
 
-static bool pushCall(app_pc pc, reg_t sp)
+static bool pushCall(app_pc pc, reg_t bp, reg_t sp)
 {
     void *drcontext = dr_get_current_drcontext();
 
@@ -575,7 +575,7 @@ static bool pushCall(app_pc pc, reg_t sp)
 
     std::stack<CallNode *> *callStack = threadContext->getCallStack();
 
-    CallNode *node = new CallNode(pc, next_sp, return_address);
+    CallNode *node = new CallNode(pc, next_sp, bp, return_address);
     pushNodeToCallStack(callStack, node);
 
     return true;
@@ -591,7 +591,7 @@ static bool pushCall(app_pc pc, reg_t sp)
  * 
  * @post `*hasLongJmpPtr` will contain `true` or `false` if return result is `SUCCESS`, otherwise, `*hasLongJmpPtr` is undefined.
 */
-static CheckReturnResult checkReturn(reg_t sp, app_pc target_addr, bool *hasLongJmpPtr)
+static CheckReturnResult checkReturn(reg_t sp, reg_t bp, app_pc target_addr, bool *hasLongJmpPtr)
 {
     void *drcontext = dr_get_current_drcontext();
     ThreadContext *threadContext = (ThreadContext *) drmgr_get_tls_field(drcontext, tls_idx);
@@ -628,9 +628,7 @@ static CheckReturnResult checkReturn(reg_t sp, app_pc target_addr, bool *hasLong
 
     DR_ASSERT(node != NULL && node->getSp() == sp);
 
-    app_pc return_address = node->getValue();
-
-    if (return_address == target_addr) {
+    if (node->getBp() == bp && node->getReturnAddress() == target_addr) {
         delete node;
         *hasLongJmpPtr = hasLongJmp;
         return SUCCESS;
@@ -728,7 +726,7 @@ static void processIndirectJump(app_pc instr_addr, app_pc target_addr)
             // Fallthrough
 
         case CFGEDGE_NOT_FOUND: // target_addr did not match any valid edges
-            dr_fprintf(STDERR, "Invalid edge detect @ %s to %s\n", getSymbolString(instr_addr).c_str(), getSymbolString(target_addr).c_str());
+            dr_fprintf(STDERR, "!!!Invalid edge detect @ %s to %s\n", getSymbolString(instr_addr).c_str(), getSymbolString(target_addr).c_str());
             printCallTrace();
             dr_abort();
 

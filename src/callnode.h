@@ -6,14 +6,16 @@
 class CallNode {
 private:
     app_pc _pc;
+    reg_t _bp;
     reg_t _sp;
-    app_pc _value;
+    app_pc _return_address;
 
 public:
-    CallNode(app_pc pc, reg_t sp, app_pc value);
+    CallNode(app_pc pc, reg_t sp, reg_t bp, app_pc return_address);
     app_pc getPc();
     reg_t getSp();
-    app_pc getValue();
+    reg_t getBp();
+    app_pc getReturnAddress();
 };
 
 #endif
