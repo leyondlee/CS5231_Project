@@ -8,7 +8,7 @@ $ make
 
 # Run
 ```
-$ <DynamoRio Folder>/bin64/drrun -c <Project Folder>/build/libdetector.so -- <Program to run>
+$ <DynamoRio Folder>/bin64/drrun -c <Project Folder>/build/libdetector.so <CFG filename> -- <Program to run and args>
 ```
 
 # References
