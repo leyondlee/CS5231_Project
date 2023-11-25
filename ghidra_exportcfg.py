@@ -21,7 +21,7 @@ def main():
 
     args = parser.parse_args()
 
-    program_filename = args.program_filename
+    program_filename = os.path.abspath(args.program_filename)
     if not os.path.isfile(program_filename):
         print(f'Program file does not exist - "{program_filename}"')
         sys.exit(1)
