@@ -164,12 +164,16 @@ static void event_thread_exit(void *drcontext)
 static dr_emit_flags_t event_app_instruction(void *drcontext, void *tag, instrlist_t *bb, instr_t *instr, bool for_trace, bool translating, void *user_data)
 {
     if (instr_is_call_direct(instr)) {
+        // direct call instructions
         dr_insert_call_instrumentation(drcontext, bb, instr, (app_pc) at_call);
     } else if (instr_is_call_indirect(instr)) {
+        // indirect call instructions
         dr_insert_mbr_instrumentation(drcontext, bb, instr, (app_pc) at_call_ind, SPILL_SLOT_1);
     } else if (instr_is_return(instr)) {
+        // return instructions
         dr_insert_mbr_instrumentation(drcontext, bb, instr, (app_pc) at_return, SPILL_SLOT_1);
     } else if (instr_is_mbr(instr) && isInstrIndirectJump(instr)) {
+        // indirect jump instructions
         dr_insert_mbr_instrumentation(drcontext, bb, instr, (app_pc) at_jump_ind, SPILL_SLOT_1);
     }
 
@@ -183,9 +187,7 @@ static void at_call(app_pc instr_addr, app_pc target_addr)
     
     //dr_fprintf(STDERR, "CALL @ " PFX " to " PFX ", TOS is " PFX "\n", instr_addr, target_addr, mc.xsp);
 
-    if (!pushCall(instr_addr, mc.xbp, mc.xsp)) {
-        dr_abort();
-    }
+    saveCall(instr_addr, mc.xbp, mc.xsp);
 }
 
 static void at_call_ind(app_pc instr_addr, app_pc target_addr)
@@ -197,10 +199,7 @@ static void at_call_ind(app_pc instr_addr, app_pc target_addr)
     //dr_fprintf(STDERR, "Indirect call @ %s to %s, checkCfg=%d\n", getSymbolString(instr_addr).c_str(), getSymbolString(target_addr).c_str(), checkCfg(instr_addr, target_addr));
 
     processIndirectJump(instr_addr, target_addr);
-    
-    if (!pushCall(instr_addr, mc.xbp, mc.xsp)) {
-        dr_abort();
-    }
+    saveCall(instr_addr, mc.xbp, mc.xsp);
 }
 
 static void at_return(app_pc instr_addr, app_pc target_addr)
@@ -485,16 +484,32 @@ static void wrap_free_pre(void *wrapcxt, OUT void **user_data)
     delete node;
 }
 
+/**
+ * Add node to heap list.
+ * 
+ * @param[in] heapList The pointer to the heap list object.
+ * @param[in] node The pointer to the HeapNode object.
+ * 
+ * @pre heapList != nullptr && node != nullptr
+*/
 static void addNodeToHeapList(std::list<HeapNode *> *heapList, HeapNode *node)
 {
-    DR_ASSERT(heapList != NULL && node != NULL);
+    DR_ASSERT(heapList != nullptr && node != nullptr);
 
     heapList->push_back(node);
 }
 
+/**
+ * Remove node from heap list.
+ * 
+ * @param[in] heapList The pointer to the heap list object.
+ * @return true if there successfully removed from list, otherwise, false.
+ * 
+ * @pre heapList != nullptr
+*/
 static bool removeNodeFromHeapList(std::list<HeapNode *> *heapList, HeapNode *node)
 {
-    DR_ASSERT(heapList != NULL && node != NULL);
+    DR_ASSERT(heapList != nullptr && node != nullptr);
 
     if (std::find(heapList->begin(), heapList->end(), node) != heapList->end()) {
         heapList->remove(node);
@@ -504,9 +519,18 @@ static bool removeNodeFromHeapList(std::list<HeapNode *> *heapList, HeapNode *no
     return false;
 }
 
+/**
+ * Find node in heap list.
+ * 
+ * @param[in] heapList The pointer to the heap list object.
+ * @param[in] address The address associated to the HeapNode object.
+ * @return A HeapNode object if found, otherwise, nullptr.
+ * 
+ * @pre heapList != nullptr
+*/
 static HeapNode *findNodeInHeapList(std::list<HeapNode *> *heapList, void *address)
 {
-    DR_ASSERT(heapList != NULL);
+    DR_ASSERT(heapList != nullptr);
 
     for (auto node : *heapList) {
         if (node->getAddress() == address) {
@@ -518,31 +542,31 @@ static HeapNode *findNodeInHeapList(std::list<HeapNode *> *heapList, void *addre
 }
 
 /**
- * Push node to CallStack.
+ * Push node to call stack.
  * 
- * @param[in] callStack The pointer to the CallStack struct.
- * @param[in] node The pointer to the CallNode struct.
+ * @param[in] callStack The pointer to the call stack object.
+ * @param[in] node The pointer to the CallNode object.
  * 
- * @pre callStack != NULL && node != NULL
+ * @pre callStack != nullptr && node != nullptr
 */
 static void pushNodeToCallStack(std::stack<CallNode *> *callStack, CallNode *node)
 {
-    DR_ASSERT(callStack != NULL && node != NULL);
+    DR_ASSERT(callStack != nullptr && node != nullptr);
 
     callStack->push(node);
 }
 
 /**
- * Pop node from CallStack.
+ * Pop node from call stack.
  * 
- * @param[in] callStack The pointer to the CallStack struct.
- * @return Returns nullptr if there is nothing to pop, otherwise, return pointer to the CallNode struct. The CallNode needs to be freed by caller.
+ * @param[in] callStack The pointer to the call stack object.
+ * @return nullptr if there is nothing to pop, otherwise, pointer to the CallNode object. The object needs to be deleted by caller.
  * 
- * @pre callStack != NULL
+ * @pre callStack != nullptr
 */
 static CallNode *popNodeFromCallStack(std::stack<CallNode *> *callStack)
 {
-    DR_ASSERT(callStack != NULL);
+    DR_ASSERT(callStack != nullptr);
 
     if (callStack->empty()) {
         return nullptr;
@@ -554,7 +578,14 @@ static CallNode *popNodeFromCallStack(std::stack<CallNode *> *callStack)
     return node;
 }
 
-static bool pushCall(app_pc pc, reg_t bp, reg_t sp)
+/**
+ * Saves the call information in the call stack. Assume current instruction is a call.
+ * 
+ * @param[in] pc The current pc value.
+ * @param[in] bp The current base pointer value.
+ * @param[in] sp The current sp value.
+*/
+static void saveCall(app_pc pc, reg_t bp, reg_t sp)
 {
     void *drcontext = dr_get_current_drcontext();
 
@@ -577,8 +608,6 @@ static bool pushCall(app_pc pc, reg_t bp, reg_t sp)
 
     CallNode *node = new CallNode(pc, next_sp, bp, return_address);
     pushNodeToCallStack(callStack, node);
-
-    return true;
 }
 
 /**
@@ -587,9 +616,9 @@ static bool pushCall(app_pc pc, reg_t bp, reg_t sp)
  * @param[in] sp The current stack pointer.
  * @param[in] target_addr The target address the instruction will jump to.
  * @param[out] hasLongJmpPtr Pointer to a bool variable indicating if a longjmp is detected.
- * @return A `CheckReturnResult` value.
+ * @return A CheckReturnResult value.
  * 
- * @post `*hasLongJmpPtr` will contain `true` or `false` if return result is `SUCCESS`, otherwise, `*hasLongJmpPtr` is undefined.
+ * @post *hasLongJmpPtr will contain true or false if return result is SUCCESS, otherwise, *hasLongJmpPtr is undefined.
 */
 static CheckReturnResult checkReturn(reg_t sp, reg_t bp, app_pc target_addr, bool *hasLongJmpPtr)
 {
@@ -613,20 +642,19 @@ static CheckReturnResult checkReturn(reg_t sp, reg_t bp, app_pc target_addr, boo
             return SP_NOT_FOUND;
         }
 
-        DR_ASSERT(node != NULL && node->getSp() <= sp);
+        DR_ASSERT(node != nullptr && node->getSp() <= sp);
 
         if (node->getSp() == sp) {
             found = true;
             continue;
         }
 
+        // Unwinding stack
         hasLongJmp = true;
-        
-        //dr_fprintf(STDERR, "Removing node(sp=0x%lx, value=" PFX "), sp=0x%lx\n", node->sp, node->value, sp);
         delete node;
     }
 
-    DR_ASSERT(node != NULL && node->getSp() == sp);
+    DR_ASSERT(node != nullptr && node->getSp() == sp);
 
     if (node->getBp() == bp && node->getReturnAddress() == target_addr) {
         delete node;
@@ -639,6 +667,13 @@ static CheckReturnResult checkReturn(reg_t sp, reg_t bp, app_pc target_addr, boo
     return FAIL;
 }
 
+/**
+ * Check if the control flow transfer is valid
+ * 
+ * @param[in] instr_addr The address of the call/jump instruction.
+ * @param[in] target_addr The address of the destination.
+ * @return A CheckCfgResult value.
+*/
 static CheckCfgResult checkCfg(app_pc instr_addr, app_pc target_addr)
 {
     SymbolInfo *symbolInfo = getSymbolInfo(instr_addr);
@@ -716,7 +751,7 @@ static void processIndirectJump(app_pc instr_addr, app_pc target_addr)
         case DIFFERENT_MODULE: // instr_addr is not within same binary (eg. Shared library)
             // Fallthrough
 
-        case UNKNOWN_TARGET: // Cannot determine target_addr module (eg. Jumping into private mmap region)
+        case UNKNOWN_TARGET: // Cannot determine target_addr module (eg. stack, heap)
             // Fallthrough
 
         case CFGNODE_NOT_FOUND: // Static analysis did find any edges for instr_addr
@@ -753,6 +788,12 @@ static void printCallTrace()
     }
 }
 
+/**
+ * Get the symbol information related to an address.
+ * 
+ * @param[in] addr The address.
+ * @return A SymbolInfo object. The object needs to be deleted by caller.
+*/
 static SymbolInfo *getSymbolInfo(app_pc addr)
 {
     #define MAX_SYM_RESULT 256

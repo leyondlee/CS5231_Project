@@ -93,7 +93,7 @@ static HeapNode *findNodeInHeapList(std::list<HeapNode *> *heapList, void *addre
 static void pushNodeToCallStack(std::stack<CallNode *> *callStack, CallNode *node);
 static CallNode *popNodeFromCallStack(std::stack<CallNode *> *callStack);
 
-static bool pushCall(app_pc pc, reg_t bp, reg_t sp);
+static void saveCall(app_pc pc, reg_t bp, reg_t sp);
 static CheckReturnResult checkReturn(reg_t sp, reg_t bp, app_pc target_addr, bool *hasLongJmpPtr);
 static CheckCfgResult checkCfg(app_pc instr_addr, app_pc target_addr);
 static void processIndirectJump(app_pc instr_addr, app_pc target_addr);
