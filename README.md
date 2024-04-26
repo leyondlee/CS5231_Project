@@ -1,4 +1,10 @@
-# Build
+# Export Control Flow Graph
+```
+$ GHIDRA_INSTALL_DIR=<Ghidra Folder> python3 <Project Folder>/ghidra_exportcfg.py <Target Program> <Output Filename>
+```
+Note: Run Ghidra at least once
+
+# Build DynamoRIO Client
 ```
 $ cd <Project Folder>
 $ mkdir build && cd ./build
