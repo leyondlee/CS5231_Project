@@ -1,7 +1,7 @@
 # Detector
 The objectives of this project are to develop a custom DynamoRIO tool for x86-64 ELF binaries to:
-* Provide control flow protection based on control flow graphs and shadow stack.
-* Detect invalid frees by tracking heap memory allocations.
+* Provide control flow protection based on control flow graphs and shadow stack
+* Detect invalid frees by tracking heap memory allocations
 
 ## Export Control Flow Graph
 ```
