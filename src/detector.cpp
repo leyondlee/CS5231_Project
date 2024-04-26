@@ -596,10 +596,11 @@ static void saveCall(app_pc pc, reg_t bp, reg_t sp)
     instr_init(drcontext, &instr);
     app_pc res = decode(drcontext, pc, &instr);
     DR_ASSERT(res != NULL);
-    instr_free(drcontext, &instr);
 
     // Return address
     app_pc return_address = pc + instr_length(drcontext, &instr);
+
+    instr_free(drcontext, &instr);
 
     ThreadContext *threadContext = (ThreadContext *) drmgr_get_tls_field(drcontext, tls_idx);
     DR_ASSERT(threadContext != NULL);
