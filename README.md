@@ -5,8 +5,8 @@ The objectives of this project are to develop a custom DynamoRIO tool for x86-64
 
 ## Prerequisites
 * Python 3
-* [Ghidra](https://github.com/NationalSecurityAgency/ghidra) (Tested on: v10.4)
-* [DynamoRIO](https://dynamorio.org/) (Tested on: v9.0.1)
+* [Ghidra](https://github.com/NationalSecurityAgency/ghidra) (v10.4)
+* [DynamoRIO](https://dynamorio.org/) (v9.0.1)
 
 ## Export Control Flow Graph
 ```
