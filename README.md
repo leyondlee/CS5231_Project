@@ -3,6 +3,11 @@ The objectives of this project are to develop a custom DynamoRIO tool for x86-64
 * Provide control flow protection using control flow graph and shadow stack
 * Detect invalid frees by tracking heap memory allocations
 
+## Prerequisites
+* Python 3
+* [Ghidra](https://github.com/NationalSecurityAgency/ghidra) (Tested on: v10.4)
+* [DynamoRIO](https://dynamorio.org/) (Tested on: v9.0.1)
+
 ## Export Control Flow Graph
 ```
 $ GHIDRA_INSTALL_DIR=<Ghidra Folder> python3 <Project Folder>/ghidra_exportcfg.py <Target Program> <Output Filename>
